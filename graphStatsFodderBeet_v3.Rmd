@@ -1,0 +1,445 @@
+---
+title: "Untitled"
+output: word_document
+---
+
+## Load   observed
+
+```{r Load,echo=FALSE, include = FALSE, warning=FALSE, fig.height=8, fig.width=8}
+
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library (hydroGOF)
+library(xtable)
+library(knitr)
+library(tidyr)
+library(RSQLite)
+
+# load data
+setwd("C:\\GitHubRepos\\ApsimX\\Prototypes\\FodderBeet\\Observations")
+
+obsF <- "C:\\GitHubRepos\\FodderBeetModel\\"
+obsData <- read.table(paste0(obsF, "ObservedDataForStats.txt"), 
+                      header = TRUE)
+
+# get time format right
+obsData <- obsData %>% mutate(Date = dmy(Date))
+str(obsData)
+head(obsData)
+summary(obsData)
+
+# create N categories
+obsData$N_cat <- NULL
+obsData$N_cat[obsData$N_Treat<=75] <- "low N"
+obsData$N_cat[obsData$N_Treat>75 & obsData$NTrmt<=150] <- "mid N"
+obsData$N_cat[obsData$N_Treat>150] <- "high N"
+
+
+# create yield categories
+obsData$yieldCat <- NULL
+obsData$yieldCat[obsData$N_lim== "No" & obsData$W_lim== "No"] <- "Potential"
+obsData$yieldCat[obsData$N_lim== "Yes" & obsData$W_lim== "No"] <- "N-limited only"
+obsData$yieldCat[obsData$N_lim== "No" & obsData$W_lim== "Yes"] <- "Water-limited only"
+obsData$yieldCat[obsData$N_lim== "Yes" & obsData$W_lim== "Yes"] <- "Co-limited"
+
+obsData$N_cat <- as.factor(obsData$N_cat)
+
+summary(obsData)
+
+head(obsData)
+
+print(unique(obsData$Name))
+
+```
+
+## Define stats
+
+```{r Stats, include = FALSE, echo=FALSE, warning=FALSE, fig.height=8, fig.width=8}
+
+# # R2
+# testDF <- data.frame(a=c(1,2,3,4,5), b=c(10,20,10,40,50))
+# 
+# myR2 <- function(p,o) {
+#  return(summary(lm(p~o, na.action=na.exclude))$r.squared) 
+# }
+# 
+# testDF %>%
+#   summarise(thisR2 = myR2(a,b))
+
+# gauch MSE components
+gauchStats <- function(sim, meas) {
+
+  n_s <- length(sim)
+  n_m <- length(meas)
+  model <- lm(meas~sim)
+  sim_sq <- sum((sim - mean(sim))^2)
+  mes_sq <- sum((meas - mean(meas))^2)
+  r2 <- summary(model)$r.squared
+  slope <- model$coefficients[[2]]
+
+  sb <- (sum(mean(meas)) - sum(mean(sim)))^2
+  nu <- (1-slope)^2 * (sim_sq/n_s)
+  lc <- (1-r2) * (mes_sq/n_m)
+  msd <- sb+nu+lc
+
+  sb_r <- round((sb/msd)*100,1)
+  nu_r <- round((nu/msd)*100,1)
+  lc_r <- round((lc/msd)*100,1)
+
+  msd_r <- sb_r+nu_r+lc_r
+
+  # select
+ # out <- c(sb_r,nu_r,lc_r, msd_r)
+ # out <- c(sb,nu,lc, msd,sim_sq,mes_sq,r2,n_s,n_m,slope ) # testing
+  out <- c(sb_r,nu_r,lc_r, msd_r, round(r2*100,1))
+
+  return(out)
+
+}
+
+# test dataset
+s <- c(342.5,   68.3,   70.1,   286.1,  333.8)
+m <- c(299.64,  161.36, 201.45, 220.8,  217.67)
+
+x <- gauchStats(s,m)
+
+x[1]
+x[2]
+x[3]
+x[4]
+x[5]
+```
+
+## Load simulated
+
+```{r LoadSim, include = FALSE, echo=FALSE, warning=FALSE, fig.height=8, fig.width=8}
+
+# create function to read data (Justin's script)
+GetApsimNGTable <- function(dbLoc, table) 
+{
+  connection <- dbConnect(SQLite(), dbname = dbLoc, flags = SQLITE_RW)
+  table <- dbReadTable(connection, table, row.names=NULL)
+  dbDisconnect(connection)
+  return(table)
+}
+
+
+# load address of db
+db.address <- "C:\\GitHubRepos\\ApsimX\\Prototypes\\FodderBeet\\FodderBeet.db"
+
+# check what's inside db
+con <- dbConnect(SQLite(), dbname = db.address, flags = SQLITE_RW)
+alltables <- dbListTables(con)
+alltables
+
+# set table to be enquierd
+tableName <- "Report" # 
+
+# load table into an object
+myDbTable <- GetApsimNGTable(db.address,tableName)
+
+# make it a dataframe
+df <- as.data.frame(myDbTable)
+
+# change date to corerct format 
+df$Date <- ymd_hms(df$Clock.Today)
+
+# explore the df
+head(df)
+summary(df)
+str(df)
+
+
+# add sim names (FIXME: this should come from DF --- Attention!!!! if sims are moved out of position)
+# simNameDf <- data.frame(
+#   Name = c(
+# "LincolnP21_Cv2011",
+# "LincolnP21_Cv2012",
+# "AshleyP21_Cv2013",
+# "Lincoln2014CvRiv_Oct",
+# "Lincoln2014CvRiv_Sep",
+# "Lincoln2014CvRiv_Nov",
+# "Lincoln2014CvRiv_Dec",
+# "Lincoln2014CvBri_Sep",
+# "Lincoln2014CvBri_Nov",
+# "Lincoln2014CvBri_Oct",
+# "Lincoln2014CvBri_Dec"
+# ),
+#   SimulationID = c(1,2,3,4,5,6,7,8,9,10,11)
+# )
+
+# get sim names (different table)
+simNameDf <- as.data.frame (GetApsimNGTable(db.address,"Simulations"))
+
+# merge names
+myDb <- merge(df, simNameDf, by.x= c("SimulationID"), by.y= c("ID"))
+
+# remove unecessary variables
+myDb <- myDb %>%
+  dplyr::select(-FodderBeet.Phenology.CurrentPhaseName, 
+         -Phenology.Photoperiod.Value) 
+
+
+# explore the df
+head(myDb)
+summary(myDb)
+str(myDb)
+```
+
+## Prepare merge
+
+```{r Merge, include = FALSE, echo=FALSE, warning=FALSE, fig.height=8, fig.width=8}
+# Add info for merging
+
+# Remove extra variables that are not for comparing with observed data
+varsToDelete <- grep("ExtraVariables|Phenology|irrigation",
+                     names(myDb)) # find output variables
+varsToDelete
+myDb <- myDb %>% select(-varsToDelete)
+
+# re-arrange
+outVarsPos <- grep("FodderBeet",names(myDb)) # find output variables
+simData <- myDb %>% gather("Variable", "Predicted", outVarsPos)
+
+head(simData)
+head(obsData)
+str(simData)
+summary(simData)
+summary(obsData)
+
+mergedDF <- data.frame()
+mergedDF <- merge(obsData,simData, by=c("Date","Variable","Name")) # FIXME: add experiment?
+
+head(mergedDF)
+tail(mergedDF)
+summary(mergedDF)
+
+unique(mergedDF$Name)
+unique(simData$Name)
+```
+
+## Graphs for Paper
+
+```{r GraphForPaper, echo=FALSE, warning=FALSE, fig.height=8, fig.width=10}
+
+# varNameDf <- 
+#   read.table("C:\\GitHubRepos\\ApsimX\\Prototypes\\FodderBeet\\Observations\\VariableNames.txt", 
+#              header = TRUE)
+
+varNameDf <-  read.table(paste0(obsF,"VariableNames.txt"), header = TRUE)
+
+summary(varNameDf)
+
+workDF <- merge(mergedDF,varNameDf, by="Variable")
+
+# FIXME: this is hard to get by hand
+workDF$SimpleName <- 
+  factor(mergedDF$SimpleName, 
+         levels = varNameDf$SimpleName
+         )
+
+# sort out xlim and ylim for graphs (not used yet)
+maxAxesValues <- workDF %>%
+  group_by(Calib_Test, SimpleName) %>%
+  summarise(axes.limits = max(Observed, Predicted))
+
+head(maxAxesValues, 20)
+
+# df <- merge(mergedDF, maxAxesValues, by=c("Calib_Test", "SimpleName"))
+
+
+# TODO: set limits for 1:1
+# facetlims <- mergedDF %>% 
+#     group_by(Name,Variable) %>% 
+#     summarise(min = min(Predicted, Observed), max = max(Predicted, Observed)) %>%
+#     gather(range, displ, -class) %>%
+#     mutate(hwy = displ, range = NULL)
+
+
+# move LAI and interception to calibrated data
+# df <- mergedDF %>% 
+#   mutate(Calib_Test = ifelse(Name == "Lincoln2014CvRiv_Oct" &
+#                              (Variable == "FodderBeet.Leaf.CoverGreen" | 
+#                                 Variable == "FodderBeet.Leaf.LAI")
+#                              ,"Calib", as.character(Calib_Test)))
+
+
+# df <- mergedDF # not sure why this was done
+
+# all data
+workDF %>%
+  mutate(Calib_Test = ifelse(Calib_Test=="Calib","Calibration", "Test"))  %>%
+   filter(Cultivar_Treat == "Riv") %>% #
+#  filter(Name == "LincolnP21_Cv2011" | Name == "LincolnP21_Cv2012") %>%
+#  filter(W_lim == "No", N_lim == "No") %>%
+ # filter(Calib_Test == "Calib") %>%
+ # filter(SowingDate_Treat == "Oct") %>%
+  ggplot(aes(x=Observed, y= Predicted, 
+             colour= factor(Name))) +
+  geom_point(size=1.5) +
+  geom_smooth(method = "lm", se = TRUE, linetype = 3, colour="darkgrey") +
+  geom_abline(intercept = 0, slope = 1) +
+  coord_fixed(ratio = 1) +
+  facet_wrap(Calib_Test~SimpleName, scales = "free", ncol=5) + 
+ # scale_x_continuous(limits = c(maxAxesValues$axes.limits*0, maxAxesValues$axes.limits)) +
+ # scale_y_continuous(limits = c(maxAxesValues$axes.limits*0, maxAxesValues$axes.limits)) +
+  theme(legend.title=element_blank()) 
+
+
+# segmented by var type
+
+# Canopy
+workDF %>%
+  mutate(Calib_Test = ifelse(Calib_Test=="Calib","Calibration", "Test"))  %>%
+  filter(Cultivar_Treat == "Riv") %>% # get rid of Brigarier
+  filter(VariableGroup == "Devel") %>% # get rid of Brigarier
+#  filter(Name == "LincolnP21_Cv2011" | Name == "LincolnP21_Cv2012") %>%
+#  filter(W_lim == "No", N_lim == "No") %>%
+ # filter(Calib_Test == "Calib") %>%
+ # filter(SowingDate_Treat == "Oct") %>%
+  ggplot(aes(x=Observed, y= Predicted, 
+             colour= factor(Name))) +
+  geom_point(size=1.5) +
+  geom_smooth(method = "lm", se = TRUE, linetype = 3, colour="darkgrey") +
+  geom_abline(intercept = 0, slope = 1) +
+  coord_fixed(ratio = 1) +
+  facet_wrap(Calib_Test~SimpleName, scales = "free", ncol=3) + 
+  theme(legend.title=element_blank()) 
+
+# biomasss
+workDF %>%
+  mutate(Calib_Test = ifelse(Calib_Test=="Calib","Calibration", "Test"))  %>%
+  filter(Cultivar_Treat == "Riv") %>% # get rid of Brigarier
+  filter(VariableGroup == "Grow") %>% # get rid of Brigarier
+#  filter(Name == "LincolnP21_Cv2011" | Name == "LincolnP21_Cv2012") %>%
+#  filter(W_lim == "No", N_lim == "No") %>%
+ # filter(Calib_Test == "Calib") %>%
+ # filter(SowingDate_Treat == "Oct") %>%
+  ggplot(aes(x=Observed, y= Predicted, 
+             colour= factor(Name))) +
+  geom_point(size=1.5) +
+  geom_smooth(method = "lm", se = TRUE, linetype = 3, colour="darkgrey") +
+  geom_abline(intercept = 0, slope = 1) +
+  coord_fixed(ratio = 1) +
+  facet_wrap(Calib_Test~SimpleName, scales = "free", ncol=4) + 
+  theme(legend.title=element_blank()) 
+
+
+# N
+workDF %>%
+  mutate(Calib_Test = ifelse(Calib_Test=="Calib","Calibration", "Test"))  %>%
+  filter(Cultivar_Treat == "Riv") %>% # get rid of Brigarier
+  filter(VariableGroup == "Nit") %>% # get rid of Brigarier
+#  filter(Name == "LincolnP21_Cv2011" | Name == "LincolnP21_Cv2012") %>%
+#  filter(W_lim == "No", N_lim == "No") %>%
+ # filter(Calib_Test == "Calib") %>%
+ # filter(SowingDate_Treat == "Oct") %>%
+  ggplot(aes(x=Observed, y= Predicted, 
+             colour= factor(Name))) +
+  geom_point(size=1.5) +
+  geom_smooth(method = "lm", se = TRUE, linetype = 3, colour="darkgrey") +
+  geom_abline(intercept = 0, slope = 1) +
+  coord_fixed(ratio = 1) +
+  facet_wrap(Calib_Test~SimpleName, scales = "free", ncol=3) + 
+  theme(legend.title=element_blank()) 
+
+
+
+```
+
+# Stats Table
+
+```{r StatTable, echo=FALSE, warning=FALSE, fig.height=8, fig.width=8}
+
+# Give stats
+workDF %>%
+  filter(Cultivar_Treat == "Riv") %>% ## get rid of Brigarier
+  group_by(VariableGroup, SimpleName, Calib_Test) %>%
+  summarise(
+    n = n(),
+    r2 = gauchStats(Predicted,Observed)[5],
+  #  rmse = round(rmse(Predicted,Observed),0),
+    r_rmse = round(rmse(Predicted,Observed)/mean(Observed)*100,1),
+    nse = round(NSE(Predicted,Observed),1),
+    sb = gauchStats(Predicted,Observed)[1],
+  nu = gauchStats(Predicted,Observed)[2],
+  lc = gauchStats(Predicted,Observed)[3]
+  ) %>%
+  kable(format = "markdown")
+
+# Give average
+workDF %>%
+  filter(Cultivar_Treat == "Riv") %>% ## get rid of Brigarier
+  group_by(VariableGroup, Calib_Test,SimpleName) %>%
+  summarise(
+    n = n(),
+    r2 = gauchStats(Predicted,Observed)[5],
+  #  rmse = round(rmse(Predicted,Observed),0),
+    r_rmse = round(rmse(Predicted,Observed)/mean(Observed)*100,1),
+    nse = round(NSE(Predicted,Observed),1),
+    sb = gauchStats(Predicted,Observed)[1],
+  nu = gauchStats(Predicted,Observed)[2],
+  lc = gauchStats(Predicted,Observed)[3]
+  ) %>%
+  group_by(Calib_Test) %>%
+  summarise_each(funs(mean)) %>%
+  kable(format = "markdown")
+
+# test stats of subsample with APSIM
+workDF %>%
+  filter(Name == "AshleyP21_Cv2013") %>%
+  filter(Cultivar_Treat == "Riv") %>% ## get rid of Brigarier
+  group_by(VariableGroup, SimpleName, Calib_Test) %>%
+  summarise(
+    n = n(),
+    r2 = gauchStats(Predicted,Observed)[5],
+  # rmse = round(rmse(Predicted,Observed),0),
+    r_rmse = round(rmse(Predicted,Observed)/mean(Observed)*100,1),
+    nse = round(NSE(Predicted,Observed),2),
+    sb = gauchStats(Predicted,Observed)[1],
+  nu = gauchStats(Predicted,Observed)[2],
+  lc = gauchStats(Predicted,Observed)[3]
+  ) %>%
+  kable(format = "markdown")
+
+```
+
+## Analysing stats across sowing dates
+
+```{r StatsTimeSeries, echo=FALSE, warning=FALSE, fig.height=8, fig.width=8}
+
+levels(workDF$SowingDate_Treat) <- c("Sep","Oct", "Nov", "Dec")
+workDF$SowDate <- workDF$SowingDate_Treat
+levels(workDF$SowDate) <- c("1/09/2000","1/10/2000", "1/11/2000", "1/12/2000")
+workDF$SowDate <- dmy(workDF$SowDate)
+
+workDF %>%
+ # mutate(SimpleName = factor(levels(SimpleName)[c("Sep","Oct", "Nov", "Dec")])) %>%
+  filter(Experiment =="Lincoln2014" & Cultivar_Treat == "Riv") %>%
+  group_by(SimpleName,SowDate, Cultivar_Treat) %>%
+  summarise(
+    # n = n(),
+    # r2 = round(br2(Predicted,Observed)*100,0),
+    # rmse = round(rmse(Predicted,Observed),0),
+    # r_rmse = round(rmse(Predicted,Observed)/mean(Observed)*100,1),
+    # nse = round(NSE(Predicted,Observed),1),
+    mse = rmse(Predicted,Observed)^2,
+    sb = gauchStats(Predicted,Observed)[1]*mse,
+    nu = gauchStats(Predicted,Observed)[2]*mse,
+    lc = gauchStats(Predicted,Observed)[3]*mse
+  ) %>%
+  gather("StatType", "StatValue", sb:lc) %>%
+  dplyr::select(-mse) %>%
+  filter(!grepl("N",SimpleName)) %>%
+  ggplot(aes(x=SowDate, y=StatValue, fill=StatType)) +
+  # geom_point()+
+  # geom_line() +
+  geom_bar(stat = "identity") +
+  facet_wrap(~SimpleName, ncol=4, scales = "free") +
+  ylab("Mean Squated Error (MSE) ") +
+  xlab("Sowing Date")
+
+
+```
+

@@ -1,0 +1,14 @@
+Variable	SimpleName	VariableGroup
+FodderBeet.Leaf.Structure.MainStemNodeNo	"Node Number"	Devel
+FodderBeet.Leaf.PlantAppearedGreenLeafNo	"Green Leaves"	Devel
+FodderBeet.Leaf.PlantSenescedLeafNo	"Seneced Leaves"	Grow
+FodderBeet.Leaf.LAI	"LAI"	Devel
+FodderBeet.AboveGround.Wt	"Total DM"	Grow
+FodderBeet.StorageRoot.Live.Wt	"Storage Root DM"	Grow
+FodderBeet.Leaf.Live.Wt	"Leaf DM"	Grow
+FodderBeet.Petiole.Live.Wt	"Petiole DM"	Grow
+FodderBeet.AboveGround.Live.N	"Total N"	Nit
+FodderBeet.StorageRoot.Live.N	"Storage Root N"	Nit
+FodderBeet.Leaf.Live.N	"Leaf N"	Nit
+FodderBeet.Petiole.Live.N	"Petiole N"	Nit
+FodderBeet.Leaf.CoverGreen	"Light Interception"	Devel
