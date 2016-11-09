@@ -1,6 +1,6 @@
 ---
 title: "Untitled"
-output: word_document
+output: html_document
 ---
 
 ## Load   observed
@@ -17,9 +17,11 @@ library(tidyr)
 library(RSQLite)
 
 # load data
-setwd("C:\\GitHubRepos\\ApsimX\\Prototypes\\FodderBeet\\Observations")
+# setwd("C:\\GitHubRepos\\ApsimX\\Prototypes\\FodderBeet\\Observations")
 
-obsF <- "C:\\GitHubRepos\\FodderBeetModel\\"
+upDir <- "C:\\GitHubRepos\\ApsimX\\Prototypes\\FodderBeet\\Observations\\"
+
+obsF <- "C:\\GitHubRepos\\FodderBeetModel_FRNL\\"
 obsData <- read.table(paste0(obsF, "ObservedDataForStats.txt"), 
                       header = TRUE)
 
@@ -101,6 +103,10 @@ gauchStats <- function(sim, meas) {
 # test dataset
 s <- c(342.5,   68.3,   70.1,   286.1,  333.8)
 m <- c(299.64,  161.36, 201.45, 220.8,  217.67)
+
+# using a test dataset based on excel sheet in Fodder beet development folder (ok in 9 Nov 2016 eit)
+s <- c(4231.972,3935.604,3779.652,3627.687,3363.499,3230.566,2868.114,2868.827)
+m <- c(4987.66,5636.09,4754.06,4114.53,4141.72,3704.06,5142.19,4762.03)
 
 x <- gauchStats(s,m)
 
@@ -235,7 +241,7 @@ workDF <- merge(mergedDF,varNameDf, by="Variable")
 
 # FIXME: this is hard to get by hand
 workDF$SimpleName <- 
-  factor(mergedDF$SimpleName, 
+  factor(workDF$SimpleName, 
          levels = varNameDf$SimpleName
          )
 
@@ -414,30 +420,31 @@ workDF$SowDate <- workDF$SowingDate_Treat
 levels(workDF$SowDate) <- c("1/09/2000","1/10/2000", "1/11/2000", "1/12/2000")
 workDF$SowDate <- dmy(workDF$SowDate)
 
+# stack bar - sowing dates (trying to normalise by max mse within a variable type)
+# not ready
 workDF %>%
- # mutate(SimpleName = factor(levels(SimpleName)[c("Sep","Oct", "Nov", "Dec")])) %>%
   filter(Experiment =="Lincoln2014" & Cultivar_Treat == "Riv") %>%
   group_by(SimpleName,SowDate, Cultivar_Treat) %>%
   summarise(
-    # n = n(),
-    # r2 = round(br2(Predicted,Observed)*100,0),
-    # rmse = round(rmse(Predicted,Observed),0),
-    # r_rmse = round(rmse(Predicted,Observed)/mean(Observed)*100,1),
-    # nse = round(NSE(Predicted,Observed),1),
     mse = rmse(Predicted,Observed)^2,
     sb = gauchStats(Predicted,Observed)[1]*mse,
     nu = gauchStats(Predicted,Observed)[2]*mse,
     lc = gauchStats(Predicted,Observed)[3]*mse
   ) %>%
+  group_by(SimpleName) %>%
+  mutate(MSE_max = max(mse)) %>%
   gather("StatType", "StatValue", sb:lc) %>%
+  rowwise() %>%
+  mutate(StatValue_norm = (StatValue/MSE_max)) %>%
   dplyr::select(-mse) %>%
+  mutate(StatType = factor(StatType, levels = c("sb","nu","lc"))) %>%
   filter(!grepl("N",SimpleName)) %>%
-  ggplot(aes(x=SowDate, y=StatValue, fill=StatType)) +
+  ggplot(aes(x=SowDate, y=StatValue_norm, fill=StatType)) +
   # geom_point()+
   # geom_line() +
   geom_bar(stat = "identity") +
   facet_wrap(~SimpleName, ncol=4, scales = "free") +
-  ylab("Mean Squated Error (MSE) ") +
+  ylab("Normalised MSE (% of maximum) ") +
   xlab("Sowing Date")
 
 
